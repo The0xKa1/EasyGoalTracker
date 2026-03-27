@@ -7,6 +7,13 @@ import { autoLayoutNodes, findSmartPosition, findSmartRootPosition, getDeletionS
 import { downloadDrawio, exportNodesToPng, parseDrawioXml } from './features/goal-map/io';
 import { useCanvasInteractions } from './features/goal-map/useCanvasInteractions';
 
+const isEditableElement = (target) => (
+  target instanceof HTMLElement && (
+    target.isContentEditable ||
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+  )
+);
+
 export default function App() {
   const [nodes, setNodes] = useState(createInitialNodes);
   const [selectedId, setSelectedId] = useState(null);
@@ -194,6 +201,72 @@ export default function App() {
     if (reparentingId && idsToDelete.has(reparentingId)) setReparentingId(null);
     if (editingId && idsToDelete.has(editingId)) setEditingId(null);
   }, [clearSelection, editingId, nodes, reparentingId, selectedIds]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const editableTarget = isEditableElement(event.target);
+
+      if (event.key === 'Escape') {
+        if (editingId) {
+          event.preventDefault();
+          setEditingId(null);
+          return;
+        }
+
+        if (reparentingId) {
+          event.preventDefault();
+          setReparentingId(null);
+          return;
+        }
+
+        if (selectionMode) {
+          event.preventDefault();
+          setSelectionMode(false);
+          setMarqueeRect(null);
+          return;
+        }
+
+        if (selectedIds.length > 0) {
+          event.preventDefault();
+          clearSelection();
+        }
+
+        return;
+      }
+
+      if (editableTarget) return;
+
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length > 0) {
+        event.preventDefault();
+        deleteNodes([...selectedIds]);
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        setSelection(nodes.map((node) => node.id), selectedId ?? nodes[0]?.id ?? null);
+        return;
+      }
+
+      if (event.key === 'Enter' && selectedIds.length === 1 && selectedId && !reparentingId) {
+        event.preventDefault();
+        setEditingId(selectedId);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    clearSelection,
+    deleteNodes,
+    editingId,
+    nodes,
+    reparentingId,
+    selectedId,
+    selectedIds,
+    selectionMode,
+    setSelection,
+  ]);
 
   const exportToPNG = useCallback(async () => {
     if (isExporting) return;
