@@ -1,10 +1,10 @@
 import { AlertTriangle, CheckCircle2, Edit3, Link2, PlayCircle, Plus, Trash2, XCircle } from 'lucide-react';
-import { ROOT_NODE_ID } from '../config';
 
 export function NodeActionPanel({
   node,
   selectedId,
   canStartReparenting,
+  canDelete = false,
   reparentingId,
   onAddGoal,
   onAddObstacle,
@@ -88,7 +88,7 @@ export function NodeActionPanel({
           </button>
         )}
 
-        {selectedId !== ROOT_NODE_ID && (
+        {canDelete && (
           <button
             onClick={onDelete}
             className="p-3 rounded-xl hover:bg-red-100 text-red-600 transition-colors"
@@ -135,7 +135,7 @@ export function ReparentingPanel({ node, onCancel }) {
     <div className={`absolute bottom-28 left-1/2 -translate-x-1/2 transition-all duration-300 z-20 ${node ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0 pointer-events-none'}`}>
       <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl shadow-lg px-4 py-3 flex items-center gap-3">
         <div className="text-sm font-medium">
-          正在为“{node?.text || '当前节点'}”选择新父节点，点击绿色高亮节点完成，自身和后代节点不可选。
+          正在为“{node?.text || '当前节点'}”重设父节点。先点击当前节点周围的琥珀色锚点，再点击绿色候选父节点上的锚点完成连线。
         </div>
         <button
           onClick={onCancel}

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import CanvasScene from './features/goal-map/components/CanvasScene';
 import GoalMapToolbar from './features/goal-map/components/GoalMapToolbar';
 import { MultiSelectPanel, NodeActionPanel, ReparentingPanel } from './features/goal-map/components/FloatingPanels';
-import { createInitialNodes, generateId, ROOT_NODE_ID } from './features/goal-map/config';
-import { autoLayoutNodes, findSmartPosition, getDeletionSet, getDescendantIds, getExportBounds, getNodeHeight, getNodeWidth, getNormalizedRect } from './features/goal-map/graph';
+import { createInitialNodes, createRootNode, generateId } from './features/goal-map/config';
+import { autoLayoutNodes, findSmartPosition, findSmartRootPosition, getDeletionSet, getDescendantIds, getExportBounds, getNodeHeight, getNodeWidth, getNormalizedRect } from './features/goal-map/graph';
 import { downloadDrawio, exportNodesToPng, parseDrawioXml } from './features/goal-map/io';
 import { useCanvasInteractions } from './features/goal-map/useCanvasInteractions';
 
@@ -102,13 +102,11 @@ export default function App() {
     marqueeRect,
     setNodes,
     setSelectedId,
-    setReparentingId,
     setMarqueeRect,
     setTransform,
     setSelection,
     clearSelection,
     getCanvasPoint,
-    updateNode,
   });
 
   useEffect(() => {
@@ -162,6 +160,21 @@ export default function App() {
     setReparentingId(null);
   }, [nodes, setSelection]);
 
+  const addRootGoal = useCallback(() => {
+    const nextPosition = findSmartRootPosition(nodes);
+    const newRoot = createRootNode({
+      x: nextPosition.x,
+      y: nextPosition.y,
+    });
+
+    setNodes((previous) => [...previous, newRoot]);
+    setSelection([newRoot.id], newRoot.id);
+    setEditingId(newRoot.id);
+    setReparentingId(null);
+    setSelectionMode(false);
+    setMarqueeRect(null);
+  }, [nodes, setSelection]);
+
   const autoArrange = useCallback(() => {
     const layoutedNodes = autoLayoutNodes(nodes);
     setNodes(layoutedNodes);
@@ -210,7 +223,7 @@ export default function App() {
   }, [nodes]);
 
   const clearCanvas = useCallback(() => {
-    const confirmed = window.confirm('确定要一键清屏吗？当前画布内容将被清空，仅保留根节点。');
+    const confirmed = window.confirm('确定要一键清屏吗？当前画布内容将被清空，仅保留一个总目标节点。');
     if (!confirmed) return;
 
     setNodes(createInitialNodes());
@@ -244,11 +257,73 @@ export default function App() {
   const reparentBlockedIds = reparentingId ? getDescendantIds(nodes, reparentingId) : new Set();
   if (reparentingId) reparentBlockedIds.add(reparentingId);
 
-  const canStartReparenting = selectedIds.length === 1 && selectedId && selectedId !== ROOT_NODE_ID;
+  const canStartReparenting = selectedIds.length === 1 && Boolean(selectedId);
+  const canDeleteSelectedNode = selectedIds.length === 1 && Boolean(selectedNode);
   const isValidReparentTarget = (nodeId) => Boolean(reparentingId) && !reparentBlockedIds.has(nodeId);
   const isInvalidReparentTarget = (nodeId) => Boolean(reparentingId) && reparentBlockedIds.has(nodeId);
   const reparentingNode = nodes.find((node) => node.id === reparentingId);
   const floatingSelectedNode = selectedIds.length === 1 ? selectedNode : null;
+  const anchorSpecs = reparentingNode
+    ? [
+        {
+          nodeId: reparentingNode.id,
+          role: 'child',
+          connectionNodeId: reparentingNode.id,
+          activeAnchorId: reparentingNode.childAnchorId ?? null,
+        },
+        ...nodes
+          .filter((node) => isValidReparentTarget(node.id))
+          .map((node) => ({
+            nodeId: node.id,
+            role: 'reparent-target',
+            connectionNodeId: reparentingNode.id,
+            activeAnchorId: node.id === reparentingNode.parentId
+              ? reparentingNode.parentAnchorId ?? null
+              : null,
+          })),
+      ]
+    : selectedIds.length === 1 && selectedNode?.parentId
+      ? [
+          {
+            nodeId: selectedNode.id,
+            role: 'child',
+            connectionNodeId: selectedNode.id,
+            activeAnchorId: selectedNode.childAnchorId ?? null,
+          },
+          {
+            nodeId: selectedNode.parentId,
+            role: 'parent',
+            connectionNodeId: selectedNode.id,
+            activeAnchorId: selectedNode.parentAnchorId ?? null,
+          },
+        ]
+      : [];
+
+  const handleAnchorPointerDown = (event, anchorSpec, nodeId, anchorId) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (anchorSpec.role === 'child') {
+      updateNode(anchorSpec.connectionNodeId, { childAnchorId: anchorId });
+      setSelection([anchorSpec.connectionNodeId], anchorSpec.connectionNodeId);
+      return;
+    }
+
+    if (anchorSpec.role === 'parent') {
+      updateNode(anchorSpec.connectionNodeId, { parentAnchorId: anchorId });
+      setSelection([anchorSpec.connectionNodeId], anchorSpec.connectionNodeId);
+      return;
+    }
+
+    if (anchorSpec.role === 'reparent-target' && isValidReparentTarget(nodeId)) {
+      updateNode(anchorSpec.connectionNodeId, {
+        parentId: nodeId,
+        parentAnchorId: anchorId,
+      });
+      setSelection([anchorSpec.connectionNodeId], anchorSpec.connectionNodeId);
+      setReparentingId(null);
+    }
+  };
 
   return (
     <div className="w-full h-screen bg-yellow-50 overflow-hidden flex flex-col font-sans select-none text-gray-800">
@@ -257,6 +332,7 @@ export default function App() {
         selectionMode={selectionMode}
         isExporting={isExporting}
         onAutoArrange={autoArrange}
+        onAddRootGoal={addRootGoal}
         onImportDrawio={importFromDrawio}
         onClearCanvas={clearCanvas}
         onExportDrawio={exportToDrawio}
@@ -303,6 +379,8 @@ export default function App() {
             }}
             onNodeTextChange={(nodeId, text) => updateNode(nodeId, { text })}
             onNodeEditEnd={() => setEditingId(null)}
+            anchorSpecs={anchorSpecs}
+            onAnchorPointerDown={handleAnchorPointerDown}
           />
         </div>
       </div>
@@ -311,6 +389,7 @@ export default function App() {
         node={floatingSelectedNode}
         selectedId={selectedId}
         canStartReparenting={canStartReparenting}
+        canDelete={canDeleteSelectedNode}
         reparentingId={reparentingId}
         onAddGoal={() => addNode(selectedId, 'goal')}
         onAddObstacle={() => addNode(selectedId, 'obstacle')}
@@ -342,10 +421,10 @@ export default function App() {
 
       <div className="absolute bottom-6 right-6 text-xs text-yellow-600/70 pointer-events-none">
         {reparentingNode
-          ? '更换父节点模式：点击绿色节点完成，红色节点不可选'
+          ? '更换父节点模式：先点当前节点上的琥珀色锚点，再点绿色候选父节点上的锚点完成连线'
           : selectionMode
             ? '框选移动模式：拖拽空白处框选多个节点，随后拖动蓝色高亮节点批量移动'
-            : '按住空白处拖拽平移 • 滚轮缩放 • 双击节点修改文字'}
+            : '按住空白处拖拽平移 • 滚轮缩放 • 双击节点修改文字 • 选中节点后可直接点锚点微调连线 • 顶部可新增总目标'}
       </div>
     </div>
   );

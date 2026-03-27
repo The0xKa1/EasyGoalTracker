@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { MIN_NODE_HEIGHT, MIN_NODE_WIDTH } from './config';
-import { getDescendantIds, getNodeHeight, getNodeWidth, getNormalizedRect, rectanglesIntersect } from './graph';
+import { getNodeHeight, getNodeWidth, getNormalizedRect, rectanglesIntersect } from './graph';
 
 export function useCanvasInteractions({
   containerRef,
@@ -13,13 +13,11 @@ export function useCanvasInteractions({
   marqueeRect,
   setNodes,
   setSelectedId,
-  setReparentingId,
   setMarqueeRect,
   setTransform,
   setSelection,
   clearSelection,
   getCanvasPoint,
-  updateNode,
 }) {
   const dragInfo = useRef({
     active: false,
@@ -38,20 +36,7 @@ export function useCanvasInteractions({
 
     if (reparentingId && type === 'node') {
       event.stopPropagation();
-
-      if (id === reparentingId) {
-        setSelectedId(id);
-        return;
-      }
-
-      const blockedIds = getDescendantIds(nodes, reparentingId);
-      blockedIds.add(reparentingId);
-
-      if (!blockedIds.has(id)) {
-        updateNode(reparentingId, { parentId: id });
-        setSelectedId(reparentingId);
-        setReparentingId(null);
-      }
+      if (id === reparentingId) setSelectedId(id);
       return;
     }
 
@@ -121,12 +106,10 @@ export function useCanvasInteractions({
     selectedIds,
     selectionMode,
     setMarqueeRect,
-    setReparentingId,
     setSelectedId,
     setSelection,
     transform.x,
     transform.y,
-    updateNode,
   ]);
 
   const handlePointerMove = useCallback((event) => {

@@ -1,4 +1,4 @@
-import { Download, LayoutTemplate, Target } from 'lucide-react';
+import { Download, LayoutTemplate, PlusCircle, Target } from 'lucide-react';
 
 const baseButtonClassName = 'px-4 py-2 rounded-lg font-medium transition-all bg-white border border-yellow-300 text-yellow-800 hover:bg-yellow-50 hover:shadow shadow-sm';
 
@@ -7,6 +7,7 @@ export default function GoalMapToolbar({
   selectionMode,
   isExporting,
   onAutoArrange,
+  onAddRootGoal,
   onImportDrawio,
   onClearCanvas,
   onExportDrawio,
@@ -35,6 +36,14 @@ export default function GoalMapToolbar({
         >
           <LayoutTemplate className="w-4 h-4" />
           一键排版
+        </button>
+
+        <button
+          onClick={onAddRootGoal}
+          className={`${baseButtonClassName} flex items-center gap-2`}
+        >
+          <PlusCircle className="w-4 h-4" />
+          新增总目标
         </button>
 
         <button

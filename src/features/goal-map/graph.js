@@ -14,12 +14,94 @@ import {
   MIN_NODE_WIDTH,
   NODE_AUTO_MAX_WIDTH,
   NODE_SPAWN_GAP,
-  ROOT_NODE_ID,
 } from './config';
+
+export const CONNECTION_ANCHORS = [
+  { id: 'top-left', side: 'top', x: 0.22, y: 0 },
+  { id: 'top', side: 'top', x: 0.5, y: 0 },
+  { id: 'top-right', side: 'top', x: 0.78, y: 0 },
+  { id: 'right-top', side: 'right', x: 1, y: 0.24 },
+  { id: 'right', side: 'right', x: 1, y: 0.5 },
+  { id: 'right-bottom', side: 'right', x: 1, y: 0.76 },
+  { id: 'bottom-right', side: 'bottom', x: 0.78, y: 1 },
+  { id: 'bottom', side: 'bottom', x: 0.5, y: 1 },
+  { id: 'bottom-left', side: 'bottom', x: 0.22, y: 1 },
+  { id: 'left-bottom', side: 'left', x: 0, y: 0.76 },
+  { id: 'left', side: 'left', x: 0, y: 0.5 },
+  { id: 'left-top', side: 'left', x: 0, y: 0.24 },
+];
+
+const ANCHOR_DIRECTION_BY_SIDE = {
+  top: { x: 0, y: -1 },
+  right: { x: 1, y: 0 },
+  bottom: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+};
+
+const CONNECTOR_LEAD_DISTANCE = 22;
 
 export const getNodeWidth = (node) => node?.manualWidth ?? node?.width ?? MIN_NODE_WIDTH;
 
 export const getNodeHeight = (node) => node?.manualHeight ?? node?.height ?? MIN_NODE_HEIGHT;
+
+export const getAnchorDefinition = (anchorId) => (
+  CONNECTION_ANCHORS.find((anchor) => anchor.id === anchorId) ?? null
+);
+
+export const getNodeAnchorPoint = (node, anchorId, offsetX = 0, offsetY = 0) => {
+  const anchor = getAnchorDefinition(anchorId);
+  if (!anchor) return null;
+
+  const width = getNodeWidth(node);
+  const height = getNodeHeight(node);
+
+  return {
+    ...anchor,
+    x: node.x + width * anchor.x + offsetX,
+    y: node.y + height * anchor.y + offsetY,
+  };
+};
+
+export const resolveAnchorIdFromRatio = (x, y, preferredSide = null) => {
+  const anchors = preferredSide
+    ? CONNECTION_ANCHORS.filter((anchor) => anchor.side === preferredSide)
+    : CONNECTION_ANCHORS;
+
+  if (anchors.length === 0) {
+    return CONNECTION_ANCHORS[0]?.id ?? null;
+  }
+
+  return anchors.reduce((closest, anchor) => {
+    const distance = (anchor.x - x) ** 2 + (anchor.y - y) ** 2;
+
+    if (!closest || distance < closest.distance) {
+      return { id: anchor.id, distance };
+    }
+
+    return closest;
+  }, null)?.id ?? anchors[0].id;
+};
+
+export const resolveNearestAnchorId = (node, targetPoint, preferredSide = null) => {
+  const anchors = preferredSide
+    ? CONNECTION_ANCHORS.filter((anchor) => anchor.side === preferredSide)
+    : CONNECTION_ANCHORS;
+
+  if (anchors.length === 0) {
+    return CONNECTION_ANCHORS[0]?.id ?? null;
+  }
+
+  return anchors.reduce((closest, anchor) => {
+    const point = getNodeAnchorPoint(node, anchor.id);
+    const distance = (point.x - targetPoint.x) ** 2 + (point.y - targetPoint.y) ** 2;
+
+    if (!closest || distance < closest.distance) {
+      return { id: anchor.id, distance };
+    }
+
+    return closest;
+  }, null)?.id ?? anchors[0].id;
+};
 
 export const getStatusPalette = (type, status) => {
   if (type === 'obstacle') {
@@ -183,7 +265,7 @@ export const getDescendantIds = (nodes, nodeId) => {
 };
 
 export const getDeletionSet = (nodes, seedIds) => {
-  const idsToDelete = new Set(seedIds.filter((id) => id && id !== ROOT_NODE_ID));
+  const idsToDelete = new Set(seedIds.filter(Boolean));
 
   let addedNew = true;
   while (addedNew) {
@@ -212,18 +294,33 @@ export const autoLayoutNodes = (nodes) => {
     };
   });
 
-  const rootNode = resizedNodes.find((node) => node.id === ROOT_NODE_ID) ?? resizedNodes[0];
-  if (!rootNode) return nodes;
+  if (resizedNodes.length === 0) return nodes;
 
   const nodeById = new Map(resizedNodes.map((node) => [node.id, node]));
   const childrenByParent = new Map();
 
   resizedNodes.forEach((node) => {
-    if (!childrenByParent.has(node.parentId)) {
-      childrenByParent.set(node.parentId, []);
+    const parentId = node.parentId && nodeById.has(node.parentId) ? node.parentId : null;
+    if (!childrenByParent.has(parentId)) {
+      childrenByParent.set(parentId, []);
     }
-    childrenByParent.get(node.parentId).push(node);
+    childrenByParent.get(parentId).push({
+      ...node,
+      parentId,
+    });
   });
+
+  const resizedNodeById = new Map(
+    resizedNodes.map((node) => [node.id, { ...node, parentId: node.parentId && nodeById.has(node.parentId) ? node.parentId : null }]),
+  );
+
+  const rootNodes = [...resizedNodeById.values()]
+    .filter((node) => !node.parentId)
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+
+  if (rootNodes.length === 0) {
+    return nodes;
+  }
 
   childrenByParent.forEach((children) => {
     children.sort((a, b) => {
@@ -239,7 +336,7 @@ export const autoLayoutNodes = (nodes) => {
     const children = childrenByParent.get(nodeId) ?? [];
     children.forEach((child) => walkDepth(child.id, depth + 1));
   };
-  walkDepth(rootNode.id, 0);
+  rootNodes.forEach((rootNode) => walkDepth(rootNode.id, 0));
 
   const depthHeights = [];
   resizedNodes.forEach((node) => {
@@ -256,7 +353,7 @@ export const autoLayoutNodes = (nodes) => {
   const getSubtreeWidth = (nodeId) => {
     if (subtreeWidthCache.has(nodeId)) return subtreeWidthCache.get(nodeId);
 
-    const node = nodeById.get(nodeId);
+    const node = resizedNodeById.get(nodeId);
     if (!node) return MIN_NODE_WIDTH;
 
     const children = childrenByParent.get(nodeId) ?? [];
@@ -274,11 +371,8 @@ export const autoLayoutNodes = (nodes) => {
   };
 
   const positioned = new Map();
-  const totalWidth = getSubtreeWidth(rootNode.id);
-  const rootCenterX = 320;
-
   const positionSubtree = (nodeId, leftX) => {
-    const node = nodeById.get(nodeId);
+    const node = resizedNodeById.get(nodeId);
     if (!node) return;
 
     const depth = depthMap.get(nodeId) ?? 0;
@@ -302,7 +396,12 @@ export const autoLayoutNodes = (nodes) => {
     });
   };
 
-  positionSubtree(rootNode.id, rootCenterX - totalWidth / 2);
+  const ROOT_TREE_GAP = LAYOUT_HORIZONTAL_GAP * 3;
+  let currentForestLeft = 160;
+  rootNodes.forEach((rootNode) => {
+    positionSubtree(rootNode.id, currentForestLeft);
+    currentForestLeft += getSubtreeWidth(rootNode.id) + ROOT_TREE_GAP;
+  });
 
   const positionedNodes = resizedNodes.map((node) => positioned.get(node.id) ?? node);
   const nodesByDepth = new Map();
@@ -328,6 +427,21 @@ export const autoLayoutNodes = (nodes) => {
   });
 
   return positionedNodes;
+};
+
+export const findSmartRootPosition = (nodes) => {
+  const rootNodes = nodes.filter((node) => !node.parentId);
+  if (rootNodes.length === 0) {
+    return { x: 400, y: 220 };
+  }
+
+  const topY = Math.min(...rootNodes.map((node) => node.y));
+  const rightEdge = Math.max(...rootNodes.map((node) => node.x + getNodeWidth(node)));
+
+  return {
+    x: rightEdge + 160,
+    y: topY,
+  };
 };
 
 export const getNormalizedRect = (rect) => ({
@@ -377,6 +491,17 @@ const moveTowards = (from, to, distance) => {
     y: from.y + (dy / length) * distance,
   };
 };
+
+const moveInDirection = (point, direction, distance) => ({
+  x: point.x + direction.x * distance,
+  y: point.y + direction.y * distance,
+});
+
+const dedupeConnectorPoints = (points) => points.filter((point, index) => {
+  const previous = points[index - 1];
+  if (!previous) return true;
+  return Math.abs(previous.x - point.x) > 0.5 || Math.abs(previous.y - point.y) > 0.5;
+});
 
 const buildRoundedPathFromPoints = (points, radius) => {
   if (points.length < 2) return '';
@@ -448,44 +573,45 @@ export const getConnectorGeometry = (parent, node, offsetX = 0, offsetY = 0) => 
     y: node.y + nodeHeight / 2 + offsetY,
   };
 
-  const deltaX = nodeCenter.x - parentCenter.x;
-  const deltaY = nodeCenter.y - parentCenter.y;
-  const horizontalRoute = Math.abs(deltaX) >= Math.abs(deltaY) * 0.85;
+  const autoParentAnchorId = resolveNearestAnchorId(parent, nodeCenter);
+  const autoChildAnchorId = resolveNearestAnchorId(node, parentCenter);
+  const parentAnchorId = node.parentAnchorId ?? autoParentAnchorId;
+  const childAnchorId = node.childAnchorId ?? autoChildAnchorId;
 
-  let start;
-  let end;
-  let points;
+  const parentAnchor = getAnchorDefinition(parentAnchorId) ?? getAnchorDefinition(autoParentAnchorId);
+  const childAnchor = getAnchorDefinition(childAnchorId) ?? getAnchorDefinition(autoChildAnchorId);
+  const start = getNodeAnchorPoint(parent, parentAnchor.id, offsetX, offsetY);
+  const end = getNodeAnchorPoint(node, childAnchor.id, offsetX, offsetY);
+  const startDirection = ANCHOR_DIRECTION_BY_SIDE[parentAnchor.side] ?? { x: 0, y: 1 };
+  const endDirection = ANCHOR_DIRECTION_BY_SIDE[childAnchor.side] ?? { x: 0, y: -1 };
+  const startLead = moveInDirection(start, startDirection, CONNECTOR_LEAD_DISTANCE);
+  const endLead = moveInDirection(end, endDirection, CONNECTOR_LEAD_DISTANCE);
 
-  if (horizontalRoute) {
-    const directionX = deltaX >= 0 ? 1 : -1;
-    start = {
-      x: parentCenter.x + (parentWidth / 2) * directionX,
-      y: parentCenter.y,
-    };
-    end = {
-      x: nodeCenter.x - (nodeWidth / 2) * directionX,
-      y: nodeCenter.y,
-    };
-    const midX = start.x + (end.x - start.x) / 2;
-    points = [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end];
+  let points = [start, startLead];
+
+  if (Math.abs(startLead.x - endLead.x) < 0.5 || Math.abs(startLead.y - endLead.y) < 0.5) {
+    points.push(endLead);
+  } else if (Math.abs(startDirection.x) > 0 && Math.abs(endDirection.x) > 0) {
+    const midX = startLead.x + (endLead.x - startLead.x) / 2;
+    points.push({ x: midX, y: startLead.y }, { x: midX, y: endLead.y }, endLead);
+  } else if (Math.abs(startDirection.y) > 0 && Math.abs(endDirection.y) > 0) {
+    const midY = startLead.y + (endLead.y - startLead.y) / 2;
+    points.push({ x: startLead.x, y: midY }, { x: endLead.x, y: midY }, endLead);
+  } else if (Math.abs(startDirection.x) > 0) {
+    points.push({ x: endLead.x, y: startLead.y }, endLead);
   } else {
-    const directionY = deltaY >= 0 ? 1 : -1;
-    start = {
-      x: parentCenter.x,
-      y: parentCenter.y + (parentHeight / 2) * directionY,
-    };
-    end = {
-      x: nodeCenter.x,
-      y: nodeCenter.y - (nodeHeight / 2) * directionY,
-    };
-    const midY = start.y + (end.y - start.y) / 2;
-    points = [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end];
+    points.push({ x: startLead.x, y: endLead.y }, endLead);
   }
+
+  points.push(end);
+  points = dedupeConnectorPoints(points);
 
   return {
     points,
     start,
     end,
+    parentAnchorId: parentAnchor.id,
+    childAnchorId: childAnchor.id,
     path: buildRoundedPathFromPoints(points, getConnectorStyle(node).radius),
   };
 };

@@ -9,7 +9,6 @@ import {
   EXPORT_PADDING,
   MIN_NODE_HEIGHT,
   MIN_NODE_WIDTH,
-  ROOT_NODE_ID,
   generateId,
 } from './config';
 import {
@@ -17,8 +16,10 @@ import {
   getConnectorGeometry,
   getConnectorStyle,
   getExportBounds,
+  getAnchorDefinition,
   getNodeHeight,
   getNodeWidth,
+  resolveAnchorIdFromRatio,
   getStatusPalette,
   wrapCanvasText,
 } from './graph';
@@ -199,6 +200,27 @@ const getDrawioEdgeStyle = (node) => {
     parts.push('dashed=1', 'dashPattern=6 4');
   }
 
+  const parentAnchor = getAnchorDefinition(node.parentAnchorId);
+  const childAnchor = getAnchorDefinition(node.childAnchorId);
+
+  if (parentAnchor) {
+    parts.push(
+      `exitX=${parentAnchor.x}`,
+      `exitY=${parentAnchor.y}`,
+      'exitDx=0',
+      'exitDy=0',
+    );
+  }
+
+  if (childAnchor) {
+    parts.push(
+      `entryX=${childAnchor.x}`,
+      `entryY=${childAnchor.y}`,
+      'entryDx=0',
+      'entryDy=0',
+    );
+  }
+
   return `${parts.join(';')};`;
 };
 
@@ -370,31 +392,6 @@ const inferNodeMetaFromDrawioStyle = (style) => {
   return { type: 'goal', status: 'in-progress' };
 };
 
-const normalizeImportedNodes = (nodes) => {
-  if (nodes.length === 0) {
-    throw new Error('draw.io 文件中没有可导入的节点');
-  }
-
-  if (nodes.some((node) => node.id === ROOT_NODE_ID)) {
-    return nodes;
-  }
-
-  const rootCandidate = [...nodes]
-    .sort((a, b) => (a.parentId ? 1 : -1) - (b.parentId ? 1 : -1) || a.y - b.y || a.x - b.x)[0];
-
-  return nodes.map((node) => {
-    if (node.id === rootCandidate.id) {
-      return { ...node, id: ROOT_NODE_ID, parentId: null };
-    }
-
-    if (node.parentId === rootCandidate.id) {
-      return { ...node, parentId: ROOT_NODE_ID };
-    }
-
-    return node;
-  });
-};
-
 export const parseDrawioXml = (xmlText) => {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
@@ -406,15 +403,29 @@ export const parseDrawioXml = (xmlText) => {
   const vertexCells = Array.from(xmlDoc.querySelectorAll('mxCell[vertex="1"]'));
   const vertexIds = new Set(vertexCells.map((cell) => cell.getAttribute('id')).filter(Boolean));
   const edgeCells = Array.from(xmlDoc.querySelectorAll('mxCell[edge="1"]'));
-  const incomingParentMap = new Map();
+  const incomingEdgeMetaMap = new Map();
 
   edgeCells.forEach((cell) => {
     const source = cell.getAttribute('source');
     const target = cell.getAttribute('target');
     if (!source || !target) return;
     if (!vertexIds.has(source) || !vertexIds.has(target)) return;
-    if (!incomingParentMap.has(target)) {
-      incomingParentMap.set(target, source);
+    if (!incomingEdgeMetaMap.has(target)) {
+      const style = parseDrawioStyle(cell.getAttribute('style'));
+      const exitX = Number(style.exitX);
+      const exitY = Number(style.exitY);
+      const entryX = Number(style.entryX);
+      const entryY = Number(style.entryY);
+
+      incomingEdgeMetaMap.set(target, {
+        parentId: source,
+        parentAnchorId: Number.isFinite(exitX) && Number.isFinite(exitY)
+          ? resolveAnchorIdFromRatio(exitX, exitY)
+          : null,
+        childAnchorId: Number.isFinite(entryX) && Number.isFinite(entryY)
+          ? resolveAnchorIdFromRatio(entryX, entryY)
+          : null,
+      });
     }
   });
 
@@ -431,6 +442,7 @@ export const parseDrawioXml = (xmlText) => {
     const y = Number(geometry.getAttribute('y') ?? 0);
     const width = Math.max(MIN_NODE_WIDTH, Number(geometry.getAttribute('width') ?? MIN_NODE_WIDTH));
     const height = Math.max(MIN_NODE_HEIGHT, Number(geometry.getAttribute('height') ?? MIN_NODE_HEIGHT));
+    const incomingEdgeMeta = incomingEdgeMetaMap.get(id);
 
     return {
       id,
@@ -439,7 +451,9 @@ export const parseDrawioXml = (xmlText) => {
       status,
       x,
       y,
-      parentId: incomingParentMap.get(id) ?? null,
+      parentId: incomingEdgeMeta?.parentId ?? null,
+      parentAnchorId: incomingEdgeMeta?.parentAnchorId ?? undefined,
+      childAnchorId: incomingEdgeMeta?.childAnchorId ?? undefined,
       width,
       height,
       manualWidth: width,
@@ -447,5 +461,9 @@ export const parseDrawioXml = (xmlText) => {
     };
   }).filter(Boolean);
 
-  return normalizeImportedNodes(importedNodes);
+  if (importedNodes.length === 0) {
+    throw new Error('draw.io 文件中没有可导入的节点');
+  }
+
+  return importedNodes;
 };
