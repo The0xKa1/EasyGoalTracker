@@ -1,4 +1,4 @@
-import { Download, LayoutTemplate, PlusCircle, Target } from 'lucide-react';
+import { Download, Github, LayoutTemplate, PlusCircle, Target } from 'lucide-react';
 
 const baseButtonClassName = 'px-4 py-2 rounded-lg font-medium transition-all bg-white border border-yellow-300 text-yellow-800 hover:bg-yellow-50 hover:shadow shadow-sm';
 
@@ -16,7 +16,16 @@ export default function GoalMapToolbar({
 }) {
   return (
     <div className="h-14 bg-yellow-100/80 backdrop-blur border-b border-yellow-200 flex items-center justify-between px-6 z-10 shadow-sm">
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-3">
+        <a
+          href="https://github.com/The0xKa1/EasyGoalTracker"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-white/80 border border-yellow-300 text-yellow-800 hover:bg-yellow-50 hover:shadow-sm transition-all"
+        >
+          <Github className="w-3 h-3" />
+          <span>GitHub</span>
+        </a>
         <Target className="text-yellow-600 w-6 h-6" />
         <h1 className="font-bold text-lg text-yellow-900 tracking-wide">Easy Goal Tracker</h1>
       </div>
